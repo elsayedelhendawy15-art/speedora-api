@@ -46,14 +46,13 @@ export default {
       }
     }
 
-    // 🆕 تطبيق كود الإحالة
+    // 🆕 تطبيق كود الإحالة (بيحفظ الإحالة عند صاحب الكود)
     if (path === '/api/referral/apply' && request.method === 'POST') {
       try {
         const body = await request.json();
-        const { newUserId, referralCode } = body;
+        const { newUserId, newUserName, referralCode } = body;
         if (!newUserId || !referralCode) return new Response(JSON.stringify({ error: 'Missing params' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
 
-        // البحث عن صاحب الكود
         const referrer = await env.DB.prepare(
           `SELECT user_id, state_json FROM user_states WHERE json_extract(state_json, '$.referralCode') = ?`
         ).bind(referralCode).first();
@@ -61,12 +60,20 @@ export default {
         if (!referrer) return new Response(JSON.stringify({ ok: false, message: 'كود الإحالة غير صحيح' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
         if (referrer.user_id === newUserId) return new Response(JSON.stringify({ ok: false, message: 'لا يمكنك استخدام كودك الخاص' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
 
-        // إضافة 500 نقطة للمُحيل
         const refState = JSON.parse(referrer.state_json);
+        
+        // إضافة 500 نقطة لصاحب الكود
         refState.balance = (refState.balance || 0) + 500;
         refState.earned = (refState.earned || 0) + 500;
         refState.activity = refState.activity || [];
         refState.activity.unshift({ type: 'bonus', title: 'مكافأة إحالة صديق', points: 500, date: new Date().toISOString() });
+
+        // 🆕 حفظ اسم الصديق اللي دخل بالكود
+        refState.referrals = refState.referrals || [];
+        refState.referrals.unshift({
+          name: newUserName || 'مستخدم جديد',
+          date: new Date().toISOString()
+        });
 
         await env.DB.prepare(`UPDATE user_states SET state_json = ?, updated_at = ? WHERE user_id = ?`)
           .bind(JSON.stringify(refState), new Date().toISOString(), referrer.user_id).run();
