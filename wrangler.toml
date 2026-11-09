@@ -1,0 +1,9 @@
+name = "speedora-api"
+main = "worker.js"
+compatibility_date = "2026-11-09"
+
+# ربط قاعدة البيانات D1 (هنفعلها بعد ما ننشئ القاعدة)
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "speedora-v2-db"
+# database_id = "ضع-ال-id-هنا-بعد-إنشاء-القاعدة"
