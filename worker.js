@@ -3,6 +3,9 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // ⚠️ المفتاح السري للوحة التحكم - غيّره لأي كلمة تفتكرها
+    const ADMIN_KEY = 'Test1234'; // ← ده المفتاح اللي هتكتبه في صفحة admin.html
+
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -11,7 +14,6 @@ export default {
 
     if (request.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
-    // دوال مساعدة للتشفير
     async function hashPassword(password, salt) {
       const enc = new TextEncoder();
       const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
@@ -26,12 +28,11 @@ export default {
       return Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    // 1. Health Check
     if (path === '/api/health') {
-      return new Response(JSON.stringify({ ok: true, message: 'Speedora API is alive!' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+      return new Response(JSON.stringify({ ok: true, message: 'Speedora API v2' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
     }
 
-    // 2. تسجيل حساب جديد
+    // === Signup ===
     if (path === '/api/auth/signup' && request.method === 'POST') {
       try {
         const { email, password, name } = await request.json();
@@ -47,7 +48,7 @@ export default {
           streak: 0, lastClaim: null, level: 1, totalGamesPlayed: 0, totalTasksDone: 0,
           lastSpin: null, lastScratch: null, unlockedAchievements: [], bots: {}, lastBotUpdate: null,
           purchasedRewards: [], welcomeShown: true, referralCode: 'SPD-' + Math.random().toString(36).substring(2, 8).toUpperCase(),
-          referredBy: null, referrals: []
+          referredBy: null, referrals: [], name: name
         };
 
         await env.DB.prepare(
@@ -61,7 +62,7 @@ export default {
       }
     }
 
-    // 3. تسجيل الدخول
+    // === Login ===
     if (path === '/api/auth/login' && request.method === 'POST') {
       try {
         const { email, password } = await request.json();
@@ -80,7 +81,7 @@ export default {
       }
     }
 
-    // 4. حفظ الحالة
+    // === Save ===
     if (path === '/api/save' && request.method === 'POST') {
       try {
         const { userId, state } = await request.json();
@@ -95,7 +96,7 @@ export default {
       }
     }
 
-    // 5. جلب الحالة
+    // === Load ===
     if (path === '/api/load' && request.method === 'GET') {
       const userId = url.searchParams.get('userId');
       if (!userId) return new Response(JSON.stringify({ error: 'Missing userId' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
@@ -108,7 +109,7 @@ export default {
       }
     }
 
-    // 6. الإحالة
+    // === Referral ===
     if (path === '/api/referral/apply' && request.method === 'POST') {
       try {
         const { newUserId, newUserName, referralCode } = await request.json();
@@ -132,47 +133,32 @@ export default {
       }
     }
 
-    // ==========================================
-    // 🆕 7. مسارات Torox (جاهزة للمرحلة القادمة)
-    // ==========================================
+    // === Torox Postback (جاهز) ===
     if (path === '/api/torox/postback' && request.method === 'GET') {
       const userId = url.searchParams.get('user_id');
       const payoutStr = url.searchParams.get('payout');
-      
-      // ⚠️ هتحط الـ Secret Key بتاعك من Torox هنا لما يوافقوا
-      const TOROX_SECRET = 'ضع-الـ-secret-key-هنا'; 
-      
       if (!userId || !payoutStr) return new Response('Missing params', { status: 400 });
-
       try {
         const user = await env.DB.prepare(`SELECT state_json FROM user_states WHERE user_id = ?`).bind(userId).first();
         if (!user) return new Response('User not found', { status: 404 });
-
         const state = JSON.parse(user.state_json);
-        const POINTS_PER_DOLLAR = 1000; // كل 1 دولار = 1000 نقطة
-        const pointsToAdd = Math.floor(parseFloat(payoutStr) * POINTS_PER_DOLLAR);
-
+        const pointsToAdd = Math.floor(parseFloat(payoutStr) * 1000);
         if (pointsToAdd > 0) {
           state.balance = (state.balance || 0) + pointsToAdd;
           state.earned = (state.earned || 0) + pointsToAdd;
           state.activity = state.activity || [];
           state.activity.unshift({ type: 'task', title: 'مهمة Torox مكتملة', points: pointsToAdd, date: new Date().toISOString() });
-          
           await env.DB.prepare(`UPDATE user_states SET state_json = ?, updated_at = ? WHERE user_id = ?`)
             .bind(JSON.stringify(state), new Date().toISOString(), userId).run();
         }
         return new Response('OK', { status: 200 });
-      } catch (err) {
-        return new Response('Error', { status: 500 });
-      }
+      } catch (err) { return new Response('Error', { status: 500 }); }
     }
 
-    // ==========================================
-    // 🆕 8. مسارات لوحة التحكم (Admin)
-    // ==========================================
+    // === Admin Panel (المفتاح ثابت: Test1234) ===
     if (path.startsWith('/api/admin/')) {
       const adminKey = url.searchParams.get('key');
-      if (adminKey !== env.ADMIN_KEY) {
+      if (adminKey !== ADMIN_KEY) {
         return new Response(JSON.stringify({ error: 'غير مصرح لك بالدخول' }), { status: 403, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
       }
 
@@ -196,7 +182,7 @@ export default {
           if (!user) return new Response(JSON.stringify({ error: 'User not found' }), { status: 404, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
 
           const state = JSON.parse(user.state_json);
-          state.balance = Math.max(0, (state.balance || 0) + Number(amount)); // منع السالب
+          state.balance = Math.max(0, (state.balance || 0) + Number(amount));
           state.activity = state.activity || [];
           state.activity.unshift({ type: 'bonus', title: amount > 0 ? 'إضافة نقاط من الإدارة' : 'خصم نقاط من الإدارة', points: Number(amount), date: new Date().toISOString() });
 
